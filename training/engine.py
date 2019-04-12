@@ -50,7 +50,7 @@ def create_rnn_trainer(model, optimizer, loss_fn, grad_clip=0, track_hidden=True
         # If predicting a sequence, reshape so the last dimension has dimension
         # equal to the target dimension. First dimension should be
         # seq_len * batch_size and second one should be dimension of output
-        if len(inputs.shape) == 3:
+        if len(pred.shape) == 3:
             nouts = inputs.shape[0] * inputs.shape[1]
             pred = pred.view(nouts, -1)
             targets = targets.view(nouts)
@@ -132,7 +132,7 @@ def create_rnn_evaluator(model, metrics, device=None, hidden=None, non_blocking=
             # If predicting a sequence, reshape so the last dimension has dimension
             # equal to the target dimension. First dimension should be
             # seq_len * batch_size and second one should be dimension of output
-            if len(inputs.shape) == 3:
+            if len(pred.shape) == 3:
                 nouts = inputs.shape[0] * inputs.shape[1]
                 pred = pred.view(nouts, -1)
                 targets = targets.view(nouts)

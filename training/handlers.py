@@ -32,32 +32,32 @@ class TracerHandler(object):
             setattr(self, name, [])
             self.metrics.append(name)
 
-    def _initalize_traces(self, engine):
-        for k in self.metrics:
-            getattr(self, k).clear()
-
-    def _save_batch_loss(self, engine):
-        self._batch_trace.append(engine.state.output)
-
-    def _trace_training_loss(self, engine):
-        avg_loss = np.mean(self._batch_trace)
-        self.loss.append(avg_loss)
-        self._batch_trace.clear()
-
-    def _trace_validation(self, engine):
-        metrics = engine.state.metrics
-        template = 'val_{}'
-        for k, v in metrics.items():
-            trace = getattr(self, template.format(k))
-            trace.append(v)
-
     def attach(self, trainer, evaluator=None):
-        trainer.add_event_handler(Events.STARTED, self._initalize_traces)
-        trainer.add_event_handler(Events.ITERATION_COMPLETED, self._save_batch_loss)
-        trainer.add_event_handler(Events.EPOCH_COMPLETED, self._trace_training_loss)
+        def _initalize_traces(engine):
+            for k in self.metrics:
+                getattr(self, k).clear()
+
+        def _save_batch_loss(engine):
+            self._batch_trace.append(engine.state.output)
+
+        def _trace_training_loss(engine):
+            avg_loss = np.mean(self._batch_trace)
+            self.loss.append(avg_loss)
+            self._batch_trace.clear()
+
+        trainer.add_event_handler(Events.STARTED, _initalize_traces)
+        trainer.add_event_handler(Events.ITERATION_COMPLETED, _save_batch_loss)
+        trainer.add_event_handler(Events.EPOCH_COMPLETED, _trace_training_loss)
 
         if evaluator is not None:
-            evaluator.add_event_handler(Events.COMPLETED, self._trace_validation)
+            def _trace_validation(engine):
+                metrics = engine.state.metrics
+                template = 'val_{}'
+                for k, v in metrics.items():
+                    trace = getattr(self, template.format(k))
+                    trace.append(v)
+
+            evaluator.add_event_handler(Events.COMPLETED, _trace_validation)
 
         return self
 
@@ -82,33 +82,25 @@ class LoggerHandler(object):
         self.running_loss = 0
         self.n_batches = n_batches
 
-    def _log_batch(self, engine):
-        self.running_loss += engine.state.output
-
-        iter = (engine.state.iteration - 1) % self.n_batches + 1
-        if iter % self.log_interval == 0:
-            self.pbar.desc = self.desc.format(
-                engine.state.output)
-            self.pbar.update(self.log_interval)
-
-    def _log_epoch(self, engine):
-        self.pbar.refresh()
-        tqdm.write("Epoch: {} - avg loss: {:.2f}"
-            .format(engine.state.epoch, self.running_loss / self.n_batches))
-        self.running_loss = 0
-        self.pbar.n = self.pbar.last_print_n = 0
-
-    def _log_validation(self, engine):
-        metrics = self.evaluator.state.metrics
-
-        message = []
-        for k, v in metrics.items():
-            message.append("{}: {:.2f}".format(k, v))
-        tqdm.write('\tvalidation: ' + ' - '.join(message))
-
     def attach(self, trainer, evaluator=None, metrics=None):
-        trainer.add_event_handler(Events.ITERATION_COMPLETED, self._log_batch)
-        trainer.add_event_handler(Events.EPOCH_COMPLETED, self._log_epoch)
+        def _log_batch(engine):
+            self.running_loss += engine.state.output
+
+            iter = (engine.state.iteration - 1) % self.n_batches + 1
+            if iter % self.log_interval == 0:
+                self.pbar.desc = self.desc.format(
+                    engine.state.output)
+                self.pbar.update(self.log_interval)
+
+        def _log_epoch(engine):
+            self.pbar.refresh()
+            tqdm.write("Epoch: {} - avg loss: {:.2f}"
+                .format(engine.state.epoch, self.running_loss / self.n_batches))
+            self.running_loss = 0
+            self.pbar.n = self.pbar.last_print_n = 0
+
+        trainer.add_event_handler(Events.ITERATION_COMPLETED, _log_batch)
+        trainer.add_event_handler(Events.EPOCH_COMPLETED, _log_epoch)
         trainer.add_event_handler(Events.COMPLETED, lambda x: self.pbar.close())
 
         if evaluator is not None and metrics is None:
@@ -116,10 +108,17 @@ class LoggerHandler(object):
 
         if evaluator is not None:
             self.evaluator = evaluator
-            trainer.add_event_handler(Events.EPOCH_COMPLETED, self._log_validation)
+            def _log_validation(engine):
+                metrics = self.evaluator.state.metrics
+
+                message = []
+                for k, v in metrics.items():
+                    message.append("{}: {:.2f}".format(k, v))
+                tqdm.write('\tvalidation: ' + ' - '.join(message))
+
+            trainer.add_event_handler(Events.EPOCH_COMPLETED, _log_validation)
 
         return self
-
 
 
 class ConvergenceHandler(object):

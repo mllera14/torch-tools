@@ -3,8 +3,9 @@ import numpy as np
 from ignite.engine import Events
 from ignite.handlers import *
 from tqdm import tqdm
+from collections import deque
 
-ModelCheckpoint
+
 class LRSchedulerHandler(object):
     def __init__(self, scheduler, loss):
         self.scheduler = scheduler
@@ -118,3 +119,36 @@ class LoggerHandler(object):
             trainer.add_event_handler(Events.EPOCH_COMPLETED, self._log_validation)
 
         return self
+
+
+
+class ConvergenceHandler(object):
+    def __init__(self, tol=1e-5, patience=50):
+        self.tol = tol
+        self.patience = patience
+        self._loss_history = deque()
+
+    def self.attach(self, trainer):
+        def _reset(engine):
+            self._loss_history.clear()
+
+        def _updated_history(engine):
+            self._loss_history.append(engine.state.output)
+            if len(self._loss_history) > self.patience:
+                self._loss_history.popleft()
+
+        def _evaluate_convergence(engine):
+            if len(self._loss_history) < self.patience:
+                return
+
+            last_loss = self._loss_history[-1]
+
+            for loss in self._loss_history:
+                if abs(loss - last_loss) > self.tol:
+                    return
+
+            engine.terminate()
+
+        trainer.add_event_handler(Events.STARTED, _reset)
+        trainer.add_event_handler(Events.ITERATION_COMPLETED, _updated_history)
+        trainer.add_event_handler(Events.EPOCH_COMPLETED, _evaluate_convergence)

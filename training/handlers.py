@@ -6,7 +6,7 @@ from tqdm import tqdm
 from collections import deque
 
 
-class LRSchedulerHandler(object):
+class LRScheduler(object):
     def __init__(self, scheduler, loss):
         self.scheduler = scheduler
         self.loss = loss
@@ -20,7 +20,7 @@ class LRSchedulerHandler(object):
         return self
 
 
-class TracerHandler(object):
+class Trace(object):
     def __init__(self, val_metrics):
         self.metrics = ['loss']
         self.loss = []
@@ -32,32 +32,32 @@ class TracerHandler(object):
             setattr(self, name, [])
             self.metrics.append(name)
 
+    def _initalize_traces(self, engine):
+        for k in self.metrics:
+            getattr(self, k).clear()
+
+    def _save_batch_loss(self, engine):
+        self._batch_trace.append(engine.state.output)
+
+    def _trace_training_loss(self, engine):
+        avg_loss = np.mean(self._batch_trace)
+        self.loss.append(avg_loss)
+        self._batch_trace.clear()
+
+    def _trace_validation(self, engine):
+        metrics = engine.state.metrics
+        template = 'val_{}'
+        for k, v in metrics.items():
+            trace = getattr(self, template.format(k))
+            trace.append(v)
+
     def attach(self, trainer, evaluator=None):
-        def _initalize_traces(engine):
-            for k in self.metrics:
-                getattr(self, k).clear()
-
-        def _save_batch_loss(engine):
-            self._batch_trace.append(engine.state.output)
-
-        def _trace_training_loss(engine):
-            avg_loss = np.mean(self._batch_trace)
-            self.loss.append(avg_loss)
-            self._batch_trace.clear()
-
-        trainer.add_event_handler(Events.STARTED, _initalize_traces)
-        trainer.add_event_handler(Events.ITERATION_COMPLETED, _save_batch_loss)
-        trainer.add_event_handler(Events.EPOCH_COMPLETED, _trace_training_loss)
+        trainer.add_event_handler(Events.STARTED, self._initalize_traces)
+        trainer.add_event_handler(Events.ITERATION_COMPLETED, self._save_batch_loss)
+        trainer.add_event_handler(Events.EPOCH_COMPLETED, self._trace_training_loss)
 
         if evaluator is not None:
-            def _trace_validation(engine):
-                metrics = engine.state.metrics
-                template = 'val_{}'
-                for k, v in metrics.items():
-                    trace = getattr(self, template.format(k))
-                    trace.append(v)
-
-            evaluator.add_event_handler(Events.COMPLETED, _trace_validation)
+            evaluator.add_event_handler(Events.COMPLETED, self._trace_validation)
 
         return self
 
@@ -70,7 +70,7 @@ class TracerHandler(object):
                     wr.writerow([i + 1, v])
 
 
-class LoggerHandler(object):
+class ProgressLog(object):
     def __init__(self, loader, log_interval, pbar=None, desc=None):
         n_batches = len(loader)
         self.desc = 'iteration-loss: {:.2f}' if desc is None else desc
@@ -86,7 +86,7 @@ class LoggerHandler(object):
         def _log_batch(engine):
             self.running_loss += engine.state.output
 
-            iter = (engine.state.iteration - 1) % self.n_batches + 1
+            iter = engine.state.iteration % self.n_batches
             if iter % self.log_interval == 0:
                 self.pbar.desc = self.desc.format(
                     engine.state.output)
@@ -121,13 +121,13 @@ class LoggerHandler(object):
         return self
 
 
-class ConvergenceHandler(object):
+class ConvergenceStopping(object):
     def __init__(self, tol=1e-5, patience=50):
         self.tol = tol
         self.patience = patience
         self._loss_history = deque()
 
-    def self.attach(self, trainer):
+    def attach(self, trainer):
         def _reset(engine):
             self._loss_history.clear()
 
